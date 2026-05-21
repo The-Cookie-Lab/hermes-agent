@@ -1063,23 +1063,37 @@ def dump_api_request_debug(
 
             dump_payload["error"] = error_info
 
+        logs_dir = Path(getattr(agent, "logs_dir"))
+        logs_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        dump_file = agent.logs_dir / f"request_dump_{agent.session_id}_{timestamp}.json"
-        dump_file.write_text(
-            json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-
-        agent._vprint(f"{agent.log_prefix}🧾 Request debug dump written to: {dump_file}")
-
-        if env_var_enabled("HERMES_DUMP_REQUEST_STDOUT"):
-            print(json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str))
-
-        return dump_file
+        dump_file = logs_dir / f"request_dump_{agent.session_id}_{timestamp}.json"
+        dump_json = json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str)
+        dump_file.write_text(dump_json, encoding="utf-8")
     except Exception as dump_error:
         if agent.verbose_logging:
             logging.warning(f"Failed to dump API request debug payload: {dump_error}")
         return None
+
+    try:
+        agent._vprint(f"{agent.log_prefix}🧾 Request debug dump written to: {dump_file}")
+    except Exception as notify_error:
+        if agent.verbose_logging:
+            logging.warning(
+                "Request debug dump written but status output failed: %s",
+                notify_error,
+            )
+
+    try:
+        if env_var_enabled("HERMES_DUMP_REQUEST_STDOUT"):
+            print(dump_json)
+    except Exception as stdout_error:
+        if agent.verbose_logging:
+            logging.warning(
+                "Request debug dump written but stdout echo failed: %s",
+                stdout_error,
+            )
+
+    return dump_file
 
 
 
