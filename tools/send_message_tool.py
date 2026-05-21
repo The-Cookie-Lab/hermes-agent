@@ -1484,9 +1484,13 @@ async def _send_email(extra, chat_id, message):
     import smtplib
     from email.mime.text import MIMEText
     from email.utils import formatdate
+    from gateway.platforms.email import _normalize_send_from_address
 
     address = extra.get("address") or os.getenv("EMAIL_ADDRESS", "")
-    send_from_address = extra.get("send_from_address") or os.getenv("EMAIL_SEND_FROM_ADDRESS", "") or address
+    send_from_address = _normalize_send_from_address(
+        extra.get("send_from_address") or os.getenv("EMAIL_SEND_FROM_ADDRESS", ""),
+        address,
+    )
     password = os.getenv("EMAIL_PASSWORD", "")
     smtp_host = extra.get("smtp_host") or os.getenv("EMAIL_SMTP_HOST", "")
     try:

@@ -9,7 +9,7 @@ Environment variables:
     EMAIL_IMAP_PORT     — IMAP server port (default: 993)
     EMAIL_SMTP_HOST     — SMTP server host (e.g., smtp.gmail.com)
     EMAIL_SMTP_PORT     — SMTP server port (default: 587)
-    EMAIL_ADDRESS       — Email address for the agent
+    EMAIL_ADDRESS       — Mailbox/login identity for IMAP polling and SMTP auth
     EMAIL_SEND_FROM_ADDRESS — Optional visible sender address for outbound mail
     EMAIL_PASSWORD      — Email password or app-specific password
     EMAIL_POLL_INTERVAL — Seconds between mailbox checks (default: 15)
@@ -183,6 +183,16 @@ def _extract_email_address(raw: str) -> str:
     return raw.strip().lower()
 
 
+def _normalize_send_from_address(value: Any, fallback_address: str) -> str:
+    """Normalize a configured visible sender or fall back to the auth mailbox."""
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized:
+        return fallback_address
+    if "@" not in _extract_email_address(normalized):
+        return fallback_address
+    return normalized
+
+
 def _message_id_domain(preferred_address: str, fallback_address: str) -> str:
     """Choose a stable Message-ID domain, preferring the visible sender."""
     for candidate in (preferred_address, fallback_address):
@@ -272,9 +282,9 @@ class EmailAdapter(BasePlatformAdapter):
         #       skip_attachments: true
         extra = config.extra or {}
         self._skip_attachments = extra.get("skip_attachments", False)
-        self._send_from_address = (
-            str(extra.get("send_from_address") or os.getenv("EMAIL_SEND_FROM_ADDRESS", "")).strip()
-            or self._address
+        self._send_from_address = _normalize_send_from_address(
+            extra.get("send_from_address") or os.getenv("EMAIL_SEND_FROM_ADDRESS", ""),
+            self._address,
         )
         self._self_addresses = {
             _extract_email_address(value)

@@ -1123,6 +1123,68 @@ class TestSendEmailStandalone(unittest.TestCase):
             mock_server.login.assert_called_once_with("login@test.com", "secret")
 
     @patch.dict(os.environ, {
+        "EMAIL_ADDRESS": "login@test.com",
+        "EMAIL_PASSWORD": "secret",
+        "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_SMTP_PORT": "587",
+    })
+    def test_send_email_tool_send_from_override_is_trimmed(self):
+        """Standalone sends should normalize whitespace around the visible sender."""
+        import asyncio
+        from tools.send_message_tool import _send_email
+
+        with patch("smtplib.SMTP") as mock_smtp:
+            mock_server = MagicMock()
+            mock_smtp.return_value = mock_server
+
+            result = asyncio.run(
+                _send_email(
+                    {
+                        "address": "login@test.com",
+                        "send_from_address": "  bot@custom.example  ",
+                        "smtp_host": "smtp.test.com",
+                    },
+                    "user@test.com",
+                    "Hello",
+                )
+            )
+
+            self.assertTrue(result["success"])
+            send_call = mock_server.send_message.call_args[0][0]
+            self.assertEqual(send_call["From"], "bot@custom.example")
+
+    @patch.dict(os.environ, {
+        "EMAIL_ADDRESS": "login@test.com",
+        "EMAIL_PASSWORD": "secret",
+        "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_SMTP_PORT": "587",
+    })
+    def test_send_email_tool_invalid_send_from_falls_back_to_login_address(self):
+        """Malformed visible senders should fall back to the auth mailbox."""
+        import asyncio
+        from tools.send_message_tool import _send_email
+
+        with patch("smtplib.SMTP") as mock_smtp:
+            mock_server = MagicMock()
+            mock_smtp.return_value = mock_server
+
+            result = asyncio.run(
+                _send_email(
+                    {
+                        "address": "login@test.com",
+                        "send_from_address": 123,
+                        "smtp_host": "smtp.test.com",
+                    },
+                    "user@test.com",
+                    "Hello",
+                )
+            )
+
+            self.assertTrue(result["success"])
+            send_call = mock_server.send_message.call_args[0][0]
+            self.assertEqual(send_call["From"], "login@test.com")
+
+    @patch.dict(os.environ, {
         "EMAIL_ADDRESS": "hermes@test.com",
         "EMAIL_PASSWORD": "secret",
         "EMAIL_SMTP_HOST": "smtp.test.com",
@@ -1353,10 +1415,13 @@ class TestEmailGatewaySetupMetadata(unittest.TestCase):
         import hermes_cli.gateway as gateway_mod
 
         email_platform = next(p for p in gateway_mod._PLATFORMS if p["key"] == "email")
-        var_names = [item["name"] for item in email_platform["vars"]]
+        email_vars = [item for item in email_platform["vars"] if isinstance(item, dict)]
+        var_names = [str(item.get("name", "")) for item in email_vars]
         self.assertIn("EMAIL_SEND_FROM_ADDRESS", var_names)
-        send_from_var = next(item for item in email_platform["vars"] if item["name"] == "EMAIL_SEND_FROM_ADDRESS")
-        self.assertIn("From address", send_from_var["help"])
+        send_from_var = next(
+            item for item in email_vars if item.get("name") == "EMAIL_SEND_FROM_ADDRESS"
+        )
+        self.assertIn("From address", str(send_from_var.get("help", "")))
 
 
 if __name__ == "__main__":
