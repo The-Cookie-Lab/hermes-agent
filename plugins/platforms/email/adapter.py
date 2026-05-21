@@ -273,6 +273,12 @@ def _extract_email_address(raw: str) -> str:
     return addr if "@" in addr else ""  # a bare word (``John``) is not a sender identity
 
 
+def _normalize_send_from_address(value: Any, fallback_address: str) -> str:
+    """Configured visible sender, or the auth mailbox when blank or not an address."""
+    normalized = str(value).strip() if value is not None else ""
+    return normalized if "@" in _extract_email_address(normalized) else fallback_address
+
+
 def _strip_comments(text: str) -> str:
     """Remove (possibly nested) ``(comments)``, innermost first, until nothing changes."""
     while (stripped := _COMMENT_RE.sub(" ", text)) != text:
@@ -429,6 +435,9 @@ class EmailAdapter(BasePlatformAdapter):
         setting = lambda env, key: _get_secret(env, "") or extra.get(key, "")  # noqa: E731
         tls_verify = lambda env, key: _esecret_bool(env, is_truthy_value(extra.get(key), default=True))  # noqa: E731
         self._address = setting("EMAIL_ADDRESS", "address").strip()
+        # Visible From: only; IMAP/SMTP auth and the polled inbox stay on EMAIL_ADDRESS.
+        self._send_from_address = _normalize_send_from_address(setting("EMAIL_SEND_FROM_ADDRESS", "send_from_address"), self._address)
+        self._self_addresses = {a for a in (self._address.lower(), _extract_email_address(self._send_from_address)) if a}
         self._password = _get_secret("EMAIL_PASSWORD", "")
         self._imap_host = setting("EMAIL_IMAP_HOST", "imap_host").strip()
         self._imap_port = _esecret_int("EMAIL_IMAP_PORT", 993)
@@ -700,7 +709,7 @@ class EmailAdapter(BasePlatformAdapter):
 
     def _sender_accepted(self, sender_addr: str, msg_data: Dict[str, Any]) -> bool:
         """Pre-dispatch sender gate: self, automated, authorization, From: authentication."""
-        if sender_addr == self._address.lower():
+        if sender_addr in self._self_addresses:
             return False
         if _is_automated_sender(sender_addr, {}):
             logger.debug("[Email] Dropping automated sender at dispatch: %s", sender_addr)
@@ -781,8 +790,11 @@ class EmailAdapter(BasePlatformAdapter):
         return await self._run_send(self._send_email, (chat_id, content, reply_to), "[Email] Send failed to %s: %s", chat_id)
 
     def _message_id_domain(self) -> str:
-        """Domain for generated Message-IDs; ``localhost`` when EMAIL_ADDRESS lacks ``@``."""
-        return (self._address.rsplit("@", 1)[-1] if "@" in self._address else "") or "localhost"
+        """Message-ID domain: the visible sender's, else the login address's; ``localhost`` when neither has ``@``."""
+        for candidate in (self._send_from_address, self._address):
+            if domain := _extract_email_address(candidate).rpartition("@")[2]:
+                return domain
+        return "localhost"
 
     def _new_reply(self, to_addr: str, body: str, reply_to_msg_id: Optional[str] = None, *,
                    attach_empty_body: bool = False) -> Tuple[MIMEMultipart, str, str]:
@@ -794,7 +806,7 @@ class EmailAdapter(BasePlatformAdapter):
         original_msg_id = reply_to_msg_id or ctx.get("message_id")
         threading = (("In-Reply-To", original_msg_id), ("References", original_msg_id)) if original_msg_id else ()
         msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{self._message_id_domain()}>"
-        for key, value in (("From", self._address), ("To", to_addr), ("Subject", subject), *threading,
+        for key, value in (("From", self._send_from_address), ("To", to_addr), ("Subject", subject), *threading,
                            ("Date", formatdate(localtime=True)), ("Message-ID", msg_id)):
             msg[key] = value
         if body or attach_empty_body:
@@ -893,6 +905,7 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
     """Out-of-process Email delivery via SMTP (one-shot); standalone_sender_fn contract."""
     extra = getattr(pconfig, "extra", {}) or {}
     address, password = extra.get("address") or _get_secret("EMAIL_ADDRESS", ""), _get_secret("EMAIL_PASSWORD", "")
+    send_from_address = _normalize_send_from_address(_get_secret("EMAIL_SEND_FROM_ADDRESS", "") or extra.get("send_from_address"), address)
     smtp_host, smtp_port = extra.get("smtp_host") or _get_secret("EMAIL_SMTP_HOST", ""), _esecret_int("EMAIL_SMTP_PORT", 587)
     smtp_security = _normalize_security(_get_secret("EMAIL_SMTP_SECURITY", "") or extra.get("smtp_security"), default="tls" if smtp_port == 465 else "starttls")
     smtp_tls_verify = _esecret_bool("EMAIL_SMTP_TLS_VERIFY", is_truthy_value(extra.get("smtp_tls_verify"), default=True))
@@ -900,7 +913,7 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
         return send_error("Email not configured (EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_SMTP_HOST required)")
     try:
         msg = MIMEText(message, "plain", "utf-8")
-        for key, value in (("From", address), ("To", chat_id), ("Subject", t("platform.email.standalone_subject")), ("Date", formatdate(localtime=True))):
+        for key, value in (("From", send_from_address), ("To", chat_id), ("Subject", t("platform.email.standalone_subject")), ("Date", formatdate(localtime=True))):
             msg[key] = value
         server = _open_smtp(smtp_host, smtp_port, smtp_security, _tls_context(smtp_tls_verify, smtp_host), smtplib.SMTP, smtplib.SMTP_SSL)
         server.login(address, password)

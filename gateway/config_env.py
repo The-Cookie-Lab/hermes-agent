@@ -559,6 +559,7 @@ _ENV_STEPS: tuple = (
     _Cred(
         Platform.EMAIL, ("EMAIL_ADDRESS", "EMAIL_PASSWORD", "EMAIL_IMAP_HOST", "EMAIL_SMTP_HOST"),
         fixed=(("address", "EMAIL_ADDRESS"), ("imap_host", "EMAIL_IMAP_HOST"), ("smtp_host", "EMAIL_SMTP_HOST")),
+        optional_stripped=(("send_from_address", "EMAIL_SEND_FROM_ADDRESS"),),
     ),
     _Home(Platform.EMAIL, "EMAIL_HOME_ADDRESS"),
     _Cred(Platform.SMS, ("TWILIO_ACCOUNT_SID",), then=_sms_api_key),

@@ -1300,5 +1300,87 @@ class TestSenderAuthentication(unittest.TestCase):
         self.assertFalse(ok, reason)
 
 
+class TestSendFromOverride(unittest.TestCase):
+    """EMAIL_SEND_FROM_ADDRESS changes the visible From:, never the IMAP/SMTP login identity."""
+
+    ENV = {
+        "EMAIL_ADDRESS": "login@test.com",
+        "EMAIL_SEND_FROM_ADDRESS": "bot@custom.example",
+        "EMAIL_PASSWORD": "secret",
+        "EMAIL_IMAP_HOST": "imap.test.com",
+        "EMAIL_SMTP_HOST": "smtp.test.com",
+        "EMAIL_ALLOW_ALL_USERS": "true",
+    }
+
+    def _make_adapter(self, **env):
+        from gateway.config import PlatformConfig
+        from plugins.platforms.email.adapter import EmailAdapter
+        with patch.dict(os.environ, {**self.ENV, **env}):
+            return EmailAdapter(PlatformConfig(enabled=True))
+
+    def test_env_seeds_platform_extra(self):
+        from gateway.config import GatewayConfig, Platform, _apply_env_overrides
+        config = GatewayConfig()
+        with patch.dict(os.environ, self.ENV):
+            _apply_env_overrides(config)
+        self.assertEqual(config.platforms[Platform.EMAIL].extra["send_from_address"], "bot@custom.example")
+
+    def test_alias_copy_filtered_as_self_message(self):
+        import asyncio
+        adapter = self._make_adapter()
+        adapter._message_handler = MagicMock()
+        msg_data = {
+            "uid": b"1a", "sender_addr": "bot@custom.example", "sender_name": "Hermes Bot", "subject": "Test",
+            "message_id": "<alias@custom.example>", "in_reply_to": "", "body": "Alias copy", "attachments": [], "date": "",
+        }
+        asyncio.run(adapter._dispatch_message(msg_data))
+        adapter._message_handler.assert_not_called()
+
+    def test_reply_uses_override_header_but_login_auth(self):
+        adapter = self._make_adapter()
+        with patch("smtplib.SMTP") as mock_smtp:
+            mock_server = mock_smtp.return_value
+            adapter._send_email("user@test.com", "Here is the answer.", None)
+        sent = mock_server.send_message.call_args[0][0]
+        self.assertEqual(sent["From"], "bot@custom.example")
+        self.assertTrue(sent["Message-ID"].endswith("@custom.example>"))
+        mock_server.login.assert_called_once_with("login@test.com", "secret")
+
+    def test_attachment_send_uses_override_header_but_login_auth(self):
+        import tempfile
+        adapter = self._make_adapter()
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test document content")
+            tmp_path = f.name
+        try:
+            with patch("smtplib.SMTP") as mock_smtp:
+                mock_server = mock_smtp.return_value
+                adapter._send_email_with_attachment("user@test.com", "Here is the file", tmp_path)
+        finally:
+            os.unlink(tmp_path)
+        sent = mock_server.send_message.call_args[0][0]
+        self.assertEqual(sent["From"], "bot@custom.example")
+        mock_server.login.assert_called_once_with("login@test.com", "secret")
+
+    def test_standalone_send_uses_override_header_but_login_auth(self):
+        import asyncio
+        from types import SimpleNamespace
+        from plugins.platforms.email.adapter import _standalone_send
+        pconfig = SimpleNamespace(token=None, api_key=None, extra={"address": "login@test.com", "smtp_host": "smtp.test.com"})
+        with patch.dict(os.environ, self.ENV), patch("smtplib.SMTP") as mock_smtp:
+            mock_server = mock_smtp.return_value
+            result = asyncio.run(_standalone_send(pconfig, "user@test.com", "Hello"))
+        self.assertTrue(result["success"])
+        sent = mock_server.send_message.call_args[0][0]
+        self.assertEqual(sent["From"], "bot@custom.example")
+        mock_server.login.assert_called_once_with("login@test.com", "secret")
+
+    def test_non_address_override_falls_back_to_login_address(self):
+        adapter = self._make_adapter(EMAIL_SEND_FROM_ADDRESS="not-an-address")
+        with patch("smtplib.SMTP") as mock_smtp:
+            adapter._send_email("user@test.com", "Hi", None)
+        self.assertEqual(mock_smtp.return_value.send_message.call_args[0][0]["From"], "login@test.com")
+
+
 if __name__ == "__main__":
     unittest.main()

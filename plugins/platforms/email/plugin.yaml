@@ -29,6 +29,10 @@ optional_env:
     description: "IMAP host for inbound polling (e.g. imap.gmail.com)"
     prompt: "IMAP host"
     password: false
+  - name: EMAIL_SEND_FROM_ADDRESS
+    description: "Visible From address for outbound mail (defaults to EMAIL_ADDRESS; auth still uses EMAIL_ADDRESS)"
+    prompt: "Visible sender address"
+    password: false
   - name: EMAIL_ALLOWED_USERS
     description: "Comma-separated email addresses allowed to talk to the bot"
     prompt: "Allowed users (comma-separated)"
