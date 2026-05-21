@@ -9,7 +9,8 @@ Environment variables:
     EMAIL_IMAP_PORT     — IMAP server port (default: 993)
     EMAIL_SMTP_HOST     — SMTP server host (e.g., smtp.gmail.com)
     EMAIL_SMTP_PORT     — SMTP server port (default: 587)
-    EMAIL_ADDRESS       — Email address for the agent
+    EMAIL_ADDRESS       — Mailbox/login identity for IMAP polling and SMTP auth
+    EMAIL_SEND_FROM_ADDRESS — Optional visible sender address for outbound mail
     EMAIL_PASSWORD      — Email password or app-specific password
     EMAIL_POLL_INTERVAL — Seconds between mailbox checks (default: 15)
     EMAIL_ALLOWED_USERS — Comma-separated list of allowed sender addresses
@@ -182,6 +183,25 @@ def _extract_email_address(raw: str) -> str:
     return raw.strip().lower()
 
 
+def _normalize_send_from_address(value: Any, fallback_address: str) -> str:
+    """Normalize a configured visible sender or fall back to the auth mailbox."""
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized:
+        return fallback_address
+    if "@" not in _extract_email_address(normalized):
+        return fallback_address
+    return normalized
+
+
+def _message_id_domain(preferred_address: str, fallback_address: str) -> str:
+    """Choose a stable Message-ID domain, preferring the visible sender."""
+    for candidate in (preferred_address, fallback_address):
+        normalized = _extract_email_address(candidate)
+        if "@" in normalized:
+            return normalized.split("@", 1)[1]
+    return "localhost"
+
+
 def _extract_attachments(
     msg: email_lib.message.Message,
     skip_attachments: bool = False,
@@ -262,6 +282,15 @@ class EmailAdapter(BasePlatformAdapter):
         #       skip_attachments: true
         extra = config.extra or {}
         self._skip_attachments = extra.get("skip_attachments", False)
+        self._send_from_address = _normalize_send_from_address(
+            extra.get("send_from_address") or os.getenv("EMAIL_SEND_FROM_ADDRESS", ""),
+            self._address,
+        )
+        self._self_addresses = {
+            _extract_email_address(value)
+            for value in (self._address, self._send_from_address)
+            if value
+        }
 
         # Track message IDs we've already processed to avoid duplicates
         self._seen_uids: set = set()
@@ -432,8 +461,8 @@ class EmailAdapter(BasePlatformAdapter):
         """Convert a fetched email into a MessageEvent and dispatch it."""
         sender_addr = msg_data["sender_addr"]
 
-        # Skip self-messages
-        if sender_addr == self._address.lower():
+        # Skip self-messages, including copies sent from a configured alias.
+        if sender_addr in self._self_addresses:
             return
 
         # Never reply to automated senders
@@ -526,7 +555,7 @@ class EmailAdapter(BasePlatformAdapter):
     ) -> str:
         """Send an email via SMTP. Runs in executor thread."""
         msg = MIMEMultipart()
-        msg["From"] = self._address
+        msg["From"] = self._send_from_address
         msg["To"] = to_addr
 
         # Thread context for reply
@@ -543,7 +572,7 @@ class EmailAdapter(BasePlatformAdapter):
             msg["References"] = original_msg_id
 
         msg["Date"] = formatdate(localtime=True)
-        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{self._address.split('@')[1]}>"
+        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{_message_id_domain(self._send_from_address, self._address)}>"
         msg["Message-ID"] = msg_id
 
         msg.attach(MIMEText(body, "plain", "utf-8"))
@@ -637,7 +666,7 @@ class EmailAdapter(BasePlatformAdapter):
     ) -> str:
         """Send an email with multiple file attachments via SMTP."""
         msg = MIMEMultipart()
-        msg["From"] = self._address
+        msg["From"] = self._send_from_address
         msg["To"] = to_addr
 
         ctx = self._thread_context.get(to_addr, {})
@@ -652,7 +681,7 @@ class EmailAdapter(BasePlatformAdapter):
             msg["References"] = original_msg_id
 
         msg["Date"] = formatdate(localtime=True)
-        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{self._address.split('@')[1]}>"
+        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{_message_id_domain(self._send_from_address, self._address)}>"
         msg["Message-ID"] = msg_id
 
         if body:
@@ -718,7 +747,7 @@ class EmailAdapter(BasePlatformAdapter):
     ) -> str:
         """Send an email with a file attachment via SMTP."""
         msg = MIMEMultipart()
-        msg["From"] = self._address
+        msg["From"] = self._send_from_address
         msg["To"] = to_addr
 
         ctx = self._thread_context.get(to_addr, {})
@@ -733,7 +762,7 @@ class EmailAdapter(BasePlatformAdapter):
             msg["References"] = original_msg_id
 
         msg["Date"] = formatdate(localtime=True)
-        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{self._address.split('@')[1]}>"
+        msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{_message_id_domain(self._send_from_address, self._address)}>"
         msg["Message-ID"] = msg_id
 
         if body:

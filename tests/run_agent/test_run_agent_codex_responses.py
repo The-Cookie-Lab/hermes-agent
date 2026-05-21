@@ -1600,6 +1600,32 @@ def test_dump_api_request_debug_uses_chat_completions_url(monkeypatch, tmp_path)
     assert payload["request"]["url"] == "http://127.0.0.1:9208/v1/chat/completions"
 
 
+def test_dump_api_request_debug_survives_status_output_failure(monkeypatch, tmp_path):
+    """A successful dump should still return its file even if status output breaks."""
+    import json
+    _patch_agent_bootstrap(monkeypatch)
+    agent = run_agent.AIAgent(
+        model="gpt-4o",
+        base_url="http://127.0.0.1:9208/v1",
+        api_key="test-key",
+        quiet_mode=True,
+        max_iterations=1,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    agent.logs_dir = tmp_path
+    agent._vprint = lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("render sink closed"))
+
+    dump_file = agent._dump_api_request_debug(
+        {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        reason="preflight",
+    )
+
+    assert dump_file is not None
+    payload = json.loads(dump_file.read_text())
+    assert payload["request"]["url"] == "http://127.0.0.1:9208/v1/chat/completions"
+
+
 # --- Reasoning-only response tests (fix for empty content retry loop) ---
 
 

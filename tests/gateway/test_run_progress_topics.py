@@ -796,6 +796,21 @@ async def test_run_agent_surfaces_interim_commentary_by_default(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_run_agent_tolerates_non_dict_display_config(monkeypatch, tmp_path):
+    """display: null should fall back to defaults instead of crashing on .get()."""
+    adapter, result = await _run_with_agent(
+        monkeypatch,
+        tmp_path,
+        CommentaryAgent,
+        session_id="sess-commentary-display-null",
+        config_data={"display": None},
+    )
+
+    assert result.get("already_sent") is not True
+    assert any(call["content"] == "I'll inspect the repo first." for call in adapter.sent)
+
+
+@pytest.mark.asyncio
 async def test_run_agent_suppresses_interim_commentary_when_disabled(monkeypatch, tmp_path):
     adapter, result = await _run_with_agent(
         monkeypatch,
