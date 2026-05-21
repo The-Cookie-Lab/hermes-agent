@@ -1498,14 +1498,23 @@ def dump_api_request_debug(
         _serialized = json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str)
         _redacted_payload = json.loads(redact_sensitive_text(_serialized, force=True))
         atomic_json_write(dump_file, _redacted_payload, default=str)
-        agent._vprint(f"{agent.log_prefix}🧾 Request debug dump written to: {dump_file}")
-        if env_var_enabled("HERMES_DUMP_REQUEST_STDOUT"):
-            print(json.dumps(_redacted_payload, ensure_ascii=False, indent=2, default=str))
-        return dump_file
     except Exception as dump_error:
         if agent.verbose_logging:
             logger.warning("Failed to dump API request debug payload: %s", dump_error)
         return None
+    # The dump is on disk: a broken status sink or stdout must not turn that into a failure.
+    try:
+        agent._vprint(f"{agent.log_prefix}🧾 Request debug dump written to: {dump_file}")
+    except Exception as notify_error:
+        if agent.verbose_logging:
+            logger.warning("Request debug dump written but status output failed: %s", notify_error)
+    try:
+        if env_var_enabled("HERMES_DUMP_REQUEST_STDOUT"):
+            print(json.dumps(_redacted_payload, ensure_ascii=False, indent=2, default=str))
+    except Exception as stdout_error:
+        if agent.verbose_logging:
+            logger.warning("Request debug dump written but stdout echo failed: %s", stdout_error)
+    return dump_file
 
 
 def _direct_native_anthropic_tool_cache_capability(

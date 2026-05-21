@@ -2044,6 +2044,19 @@ def test_dump_api_request_debug_reads_the_anthropic_client_and_messages_url(monk
     assert "abcdefghijklmnopqrstuvwxyz" not in payload["request"]["headers"]["Authorization"]
 
 
+def test_dump_api_request_debug_survives_status_output_failure(monkeypatch, tmp_path):
+    """A successful dump should still return its file even if status output breaks."""
+    import json
+    agent = _build_agent(monkeypatch)
+    agent.logs_dir = tmp_path
+    agent._vprint = lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("render sink closed"))
+
+    dump_file = agent._dump_api_request_debug({"model": "gpt-4o", "messages": []}, reason="preflight")
+
+    assert dump_file is not None
+    assert json.loads(dump_file.read_text(encoding="utf-8"))["reason"] == "preflight"
+
+
 # --- Reasoning-only response tests (fix for empty content retry loop) ---
 
 
