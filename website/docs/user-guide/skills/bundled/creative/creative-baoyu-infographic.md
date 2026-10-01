@@ -1,14 +1,14 @@
 ---
-title: "Baoyu Infographic — Generate professional infographics with 21 layout types and 21 visual styles"
+title: "Baoyu Infographic — Infographics: 21 layouts x 21 styles (信息图, 可视化)"
 sidebar_label: "Baoyu Infographic"
-description: "Generate professional infographics with 21 layout types and 21 visual styles"
+description: "Infographics: 21 layouts x 21 styles (信息图, 可视化)"
 ---
 
 {/* This page is auto-generated from the skill's SKILL.md by website/scripts/generate-skill-docs.py. Edit the source SKILL.md, not this page. */}
 
 # Baoyu Infographic
 
-Generate professional infographics with 21 layout types and 21 visual styles. Analyzes content, recommends layout×style combinations, and generates publication-ready infographics. Use when user asks to create "infographic", "visual summary", "信息图", "可视化", or "高密度信息大图".
+Infographics: 21 layouts x 21 styles (信息图, 可视化).
 
 ## Skill metadata
 
@@ -19,6 +19,7 @@ Generate professional infographics with 21 layout types and 21 visual styles. An
 | Version | `1.56.1` |
 | Author | 宝玉 (JimLiu) |
 | License | MIT |
+| Platforms | linux, macos, windows |
 | Tags | `infographic`, `visual-summary`, `creative`, `image-generation` |
 
 ## Reference: full SKILL.md
@@ -139,6 +140,7 @@ If a shortcut has **Prompt Notes**, append them to the generated prompt (Step 5)
 
 ## Output Structure
 
+<!-- ascii-guard-ignore -->
 ```
 infographic/{topic-slug}/
 ├── source-{slug}.{ext}
@@ -147,6 +149,7 @@ infographic/{topic-slug}/
 ├── prompts/infographic.md
 └── infographic.png
 ```
+<!-- ascii-guard-ignore-end -->
 
 Slug: 2-4 words kebab-case from topic. Conflict: append `-YYYYMMDD-HHMMSS`.
 
@@ -196,7 +199,7 @@ See `references/structured-content-template.md` for detailed format.
 
 ### Step 4: Confirm Options
 
-Use the `clarify` tool to confirm options with the user. Since `clarify` handles one question at a time, ask the most important question first:
+Use the `clarify` tool to confirm options with the user. Put the independent questions below in one `questions` array (up to 5); ask separately any question whose options depend on an earlier answer:
 
 **Q1 — Combination**: Present 3+ layout×style combos with rationale. Ask user to pick one.
 
